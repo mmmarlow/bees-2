@@ -1,219 +1,256 @@
-# bees-2
-
 # Bee Trajectory Preprocessing Pipeline
 
-This pipeline preprocesses bee trajectory data for neural network training by:
-1. Analysing temporal autocorrelation to determine an appropriate gap threshold
-2. Interpolating trajectories to regular time intervals using cubic splines
+## Background
+
+### The Problem
+
+The raw bee trajectory data has two major problems:
+
+1. **Gaps in the data**: There are gaps of various sizes in the video frame sequence, resulting from problems tracking the 3D coordinates of the bees.
+2. **Variable frame rate**: The time between consecutive frames is not constant.
+
+These problems impact the ability of a neural network (NN) to interpret and learn information about the trajectories, as any pair of consecutive frames do not necessarily correspond to the same period of elapsed time.
+
+### The Solution: Interpolation
+
+Rather than providing timestamps as additional inputs to the NN (which increases dimensionality and training time), we preprocess the data using **cubic spline interpolation**. This approach:
+
+1. Estimates coordinates at consistent time intervals (1/30 seconds), eliminating the need for timestamp inputs
+2. Fills in small gaps, providing more usable training data
+3. Produces smooth trajectories that better represent continuous bee movement
+
+**Trade-off**: We are training on synthesised data, which may not perfectly reflect true bee behaviour. However, with careful preprocessing (using a principled gap threshold), the advantages outweigh the disadvantages.
+
+### Why Interpolate Coordinates First?
+
+We interpolate the raw (x, y, z) coordinates rather than derived variables (velocity, acceleration, etc.) because:
+
+- Small interpolation errors accumulate when reconstructing trajectories from derived variables
+- Interpolating coordinates first, then computing derived variables, ensures the preprocessed data corresponds as accurately as possible to actual bee trajectories
+
+### Determining the Gap Threshold
+
+Not all gaps should be interpolated — large gaps produce unreliable estimates because the spline has no information about what happened during that time.
+
+We use **temporal autocorrelation analysis** to determine an appropriate threshold:
+
+- Autocorrelation measures how similar a bee's position is to its position at earlier times
+- As the time lag increases, autocorrelation decays (past positions become less predictive)
+- The timescale at which autocorrelation decays tells us: beyond what gap duration does interpolation become unreliable?
+
+A gap threshold around the **25-50% autocorrelation decay time** is typically reasonable — past positions are still somewhat predictive within this interval.
+
+---
+
+## Pipeline Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PREPROCESSING PIPELINE                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐    ┌──────────────────┐    ┌─────────────────────────┐   │
+│  │  Raw Data    │    │  Autocorrelation │    │  Choose Gap Threshold   │   │
+│  │  (52 xlsx)   │───▶│  Analysis        │───▶│  from Decay Times       │   │
+│  └──────────────┘    └──────────────────┘    └───────────┬─────────────┘   │
+│                                                          │                  │
+│                                                          ▼                  │
+│  ┌──────────────┐    ┌──────────────────┐    ┌─────────────────────────┐   │
+│  │  Preprocessed│    │  Cubic Spline    │    │  Apply Threshold        │   │
+│  │  Data (CSV)  │◀───│  Interpolation   │◀───│  to Split Trajectories  │   │
+│  └──────────────┘    └──────────────────┘    └─────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### What Each Script Does
+
+| Script | Purpose |
+|--------|---------|
+| `autocorrelation_analysis.py` | Analyses how quickly positional predictability decays over time |
+| `interpolate_trajectories.py` | Performs cubic spline interpolation with your chosen gap threshold |
+| `visualise_trajectory.py` | Visualises original vs interpolated data for quality checking |
+
+### Launcher Scripts (for VS Code Run Button)
+
+| Script | What it runs |
+|--------|--------------|
+| `run_autocorrelation.py` | Runs autocorrelation analysis with editable settings |
+| `run_interpolation.py` | Runs interpolation with editable gap threshold |
+| `run_visualisation.py` | Visualises a random or specific session |
+
+---
 
 ## Requirements
 
-**Bash (Linux/Mac):**
-```bash
-pip install numpy pandas scipy matplotlib openpyxl
+Install Python packages:
+
+```
+python -m pip install numpy pandas scipy matplotlib openpyxl
 ```
 
-**Command Prompt (Windows):**
-```cmd
-pip install numpy pandas scipy matplotlib openpyxl
+---
+
+## Folder Structure
+
+```
+bee-trajectory-preprocessing/
+├── autocorrelation_analysis.py
+├── interpolate_trajectories.py
+├── visualise_trajectory.py
+├── run_autocorrelation.py
+├── run_interpolation.py
+├── run_visualisation.py
+├── README.md
+├── bee_data/
+│   ├── [your 52 xlsx files]
+│   └── ...
+└── output/
+    ├── autocorrelation_analysis.png
+    ├── autocorrelation_summary.csv
+    ├── autocorrelation_data.csv
+    └── trajectories.csv
 ```
 
-## Files
+---
 
-- `autocorrelation_analysis.py` - Analyses autocorrelation to help choose gap threshold
-- `interpolate_trajectories.py` - Performs cubic spline interpolation
-- `visualise_trajectory.py` - Visualises a random or specific session with original and interpolated data
+## Step-by-Step Workflow
 
-## Workflow
+### Step 1: Prepare Your Data
 
-### Step 1: Prepare your data
+1. Place all 52 bee xlsx files in the `bee_data/` folder
+2. Remove the 2 irrelevant files
+3. Ensure each file has the correct columns:
+   - Column G: Bee ID
+   - Column AT: Timestamp
+   - Columns AU, AV, AW: x, y, z coordinates
 
-Place all 52 bee xlsx files in a single directory. Remove the 2 irrelevant files.
+### Step 2: Run Autocorrelation Analysis
 
-### Step 2: Run autocorrelation analysis
+**Using VS Code (recommended):**
+1. Open `run_autocorrelation.py`
+2. Click the Run button (▶️)
 
-**Bash (Linux/Mac):**
-```bash
-python autocorrelation_analysis.py \
-    --input_dir /path/to/xlsx/files \
-    --output_dir /path/to/output \
-    --gap_threshold 1.0 \
-    --max_lag 5.0
+**Using terminal:**
+```
+python autocorrelation_analysis.py -i ./bee_data -o ./output
 ```
 
-**Command Prompt (Windows):**
-```cmd
-python autocorrelation_analysis.py ^
-    --input_dir C:\path\to\xlsx\files ^
-    --output_dir C:\path\to\output ^
-    --gap_threshold 1.0 ^
-    --max_lag 5.0
-```
-
-Or on a single line:
-```cmd
-python autocorrelation_analysis.py --input_dir C:\path\to\xlsx\files --output_dir C:\path\to\output --gap_threshold 1.0 --max_lag 5.0
-```
-
-**Arguments:**
-- `--input_dir`, `-i`: Directory containing the xlsx files (required)
-- `--output_dir`, `-o`: Directory for output files (required)
-- `--gap_threshold`, `-g`: Gap threshold for splitting sessions during analysis (default: 1.0s)
-- `--max_lag`, `-m`: Maximum lag for autocorrelation computation (default: 5.0s)
-- `--fps`: Target frame rate for interpolation (default: 30.0)
+**What it does internally:**
+1. Loads each bee's xlsx file
+2. Detects timestamp resets (separate recording sessions)
+3. Splits sessions at gaps > 1 second
+4. Interpolates each segment to regular 1/30s intervals
+5. Computes autocorrelation on the interpolated data
+6. Averages across all segments and bees
+7. Outputs plots and decay time statistics
 
 **Output files:**
-- `autocorrelation_analysis.png` - Visualisation of autocorrelation decay
-- `autocorrelation_summary.csv` - Summary statistics including decay times
-- `autocorrelation_data.csv` - Full autocorrelation data for further analysis
+- `autocorrelation_analysis.png` — Plot showing autocorrelation decay
+- `autocorrelation_summary.csv` — Summary statistics including decay times
+- `autocorrelation_data.csv` — Full autocorrelation data
 
-**Interpreting results:**
+### Step 3: Choose Your Gap Threshold
 
-The script reports decay times at 50%, 25%, and 10% autocorrelation thresholds. 
-- **50% decay time**: Past positions still moderately predictive
-- **25% decay time**: Past positions weakly predictive
-- **10% decay time**: Past positions nearly uninformative
+Open `autocorrelation_analysis.png` and look at the decay curves.
 
-Choose a gap threshold based on how much autocorrelation you want to preserve. A threshold around the 25-50% decay time is typically reasonable.
+The terminal output will show:
+```
+DECAY TIMES (when autocorrelation drops below threshold):
+------------------------------------------------------------
+Threshold       X (s)        Y (s)        Z (s)
+50%             0.XXX        0.XXX        0.XXX
+25%             0.XXX        0.XXX        0.XXX
+10%             0.XXX        0.XXX        0.XXX
 
-### Step 3: Run interpolation
-
-After reviewing the autocorrelation analysis, run the interpolation with your chosen threshold:
-
-**Bash (Linux/Mac):**
-```bash
-python interpolate_trajectories.py \
-    --input_dir /path/to/xlsx/files \
-    --output_file /path/to/output/trajectories.csv \
-    --gap_threshold 0.5
+RECOMMENDATION:
+Average decay time to 50% autocorrelation: X.XX seconds
+Average decay time to 25% autocorrelation: X.XX seconds
+Suggested range: X.XXs to X.XXs
 ```
 
-**Command Prompt (Windows):**
-```cmd
-python interpolate_trajectories.py ^
-    --input_dir C:\path\to\xlsx\files ^
-    --output_file C:\path\to\output\trajectories.csv ^
-    --gap_threshold 0.5
+**Choose a threshold** between the 50% and 25% decay times.
+
+### Step 4: Run Interpolation
+
+**Using VS Code:**
+1. Open `run_interpolation.py`
+2. Edit the `GAP_THRESHOLD` value to your chosen threshold
+3. Click the Run button (▶️)
+
+**Using terminal:**
+```
+python interpolate_trajectories.py -i ./bee_data -o ./output/trajectories.csv -g 0.5
 ```
 
-Or on a single line:
-```cmd
-python interpolate_trajectories.py --input_dir C:\path\to\xlsx\files --output_file C:\path\to\output\trajectories.csv --gap_threshold 0.5
+**Output:** `trajectories.csv` with columns:
+- `bee_id`: Identifier for each bee
+- `segment_id`: Unique identifier for each continuous segment
+- `time`: Timestamp in seconds (regular 1/30s intervals)
+- `x`, `y`, `z`: Interpolated coordinates
+
+### Step 5: Visualise and Verify (Optional)
+
+Inspect random sessions to verify the interpolation looks reasonable:
+
+**Using VS Code:**
+1. Open `run_visualisation.py`
+2. Click the Run button (▶️)
+3. Check the output plot
+
+**Using terminal:**
+```
+python visualise_trajectory.py -i ./bee_data -o ./output
 ```
 
-**Arguments:**
-- `--input_dir`, `-i`: Directory containing the xlsx files (required)
-- `--output_file`, `-o`: Path to output CSV file (required)
-- `--gap_threshold`, `-g`: Gap threshold in seconds (required) - gaps longer than this create segment breaks
-- `--fps`: Target frame rate for interpolation (default: 30.0)
-- `--quiet`, `-q`: Suppress progress output
+---
 
-**Output CSV columns:**
-- `bee_id`: Identifier for each bee (from column G in xlsx)
-- `segment_id`: Unique identifier for each continuous segment (format: `{bee_id}_seg{number}`)
-- `time`: Timestamp in seconds (monotonically increasing)
-- `x`: Interpolated x coordinate
-- `y`: Interpolated y coordinate
-- `z`: Interpolated z coordinate
+## Data Format Details
 
-## Example workflow
-
-**Bash (Linux/Mac):**
-```bash
-# 1. Run autocorrelation analysis
-python autocorrelation_analysis.py -i ./raw_data -o ./analysis_output
-
-# 2. Review the output plots and summary
-# Suppose the analysis suggests decay times around 0.3-0.6 seconds
-
-# 3. Run interpolation with chosen threshold (e.g., 0.5s)
-python interpolate_trajectories.py -i ./raw_data -o ./preprocessed/trajectories.csv -g 0.5
-```
-
-**Command Prompt (Windows):**
-```cmd
-REM 1. Run autocorrelation analysis
-python autocorrelation_analysis.py -i .\raw_data -o .\analysis_output
-
-REM 2. Review the output plots and summary
-REM Suppose the analysis suggests decay times around 0.3-0.6 seconds
-
-REM 3. Run interpolation with chosen threshold (e.g., 0.5s)
-python interpolate_trajectories.py -i .\raw_data -o .\preprocessed\trajectories.csv -g 0.5
-```
-
-## Visualising trajectories
-
-Use `visualise_trajectory.py` to inspect a random (or specific) session with both original and interpolated data.
-
-**Bash (Linux/Mac):**
-```bash
-# Random session, display interactively
-python visualise_trajectory.py -i ./bee_data
-
-# Random session, save to file
-python visualise_trajectory.py -i ./bee_data -o ./plots
-
-# Specific file and session
-python visualise_trajectory.py -i ./bee_data -o ./plots --bee_file bee001.xlsx --session_index 2
-
-# With random seed for reproducibility
-python visualise_trajectory.py -i ./bee_data -o ./plots --seed 42
-```
-
-**Command Prompt (Windows):**
-```cmd
-REM Random session, display interactively
-python visualise_trajectory.py -i .\bee_data
-
-REM Random session, save to file
-python visualise_trajectory.py -i .\bee_data -o .\plots
-
-REM Specific file and session
-python visualise_trajectory.py -i .\bee_data -o .\plots --bee_file bee001.xlsx --session_index 2
-
-REM With random seed for reproducibility
-python visualise_trajectory.py -i .\bee_data -o .\plots --seed 42
-```
-
-**Arguments:**
-- `--input_dir`, `-i`: Directory containing the xlsx files (required)
-- `--output_dir`, `-o`: Directory for output plots (if not specified, displays interactively)
-- `--fps`: Target frame rate for interpolation (default: 30.0)
-- `--bee_file`: Specific xlsx file to use (if not specified, random selection)
-- `--session_index`: Specific session index within the file (if not specified, random selection)
-- `--seed`: Random seed for reproducibility
-
-**Output:**
-A figure with 4 subplots:
-1. 3D trajectory with original points (blue) and interpolated line (red)
-2. X coordinate over time
-3. Y coordinate over time
-4. Z coordinate over time
-
-## Data format notes
-
-### Input xlsx files
+### Input xlsx Files
 - Column G: Bee ID (ID_No)
 - Column AT: Timestamp
 - Column AU: x coordinate
-- Column AV: y coordinate  
+- Column AV: y coordinate
 - Column AW: z coordinate
 - First row contains headers
 
-### Timestamp resets
+### Timestamp Resets
 The scripts automatically detect and handle timestamp resets that occur when data from multiple video recordings are appended in a single file. Resets are detected when the timestamp decreases by more than 0.5 seconds.
 
-### Gap handling
-- Gaps ≤ threshold: Interpolated using cubic spline
-- Gaps > threshold: Trajectory split into separate segments
+### Gap Handling
+- **Gaps ≤ threshold**: Interpolated using cubic spline
+- **Gaps > threshold**: Trajectory split into separate segments (each gets a unique `segment_id`)
 
-## Notes for dissertation
+---
 
-The gap threshold should be justified based on the autocorrelation analysis. In your methods section, you can report:
+## Notes for Dissertation
 
-1. The autocorrelation decay profile (include the plot)
-2. The decay times at various thresholds
-3. Your chosen gap threshold and the rationale
+The gap threshold should be justified based on the autocorrelation analysis. In your methods section, you can write something like:
 
-This provides a principled, data-driven justification for your preprocessing choices rather than using an arbitrary threshold.
+> "The gap threshold for interpolation was determined empirically using temporal autocorrelation analysis. Autocorrelation of the (x, y, z) coordinates was computed across all bee trajectories after interpolating to regular 1/30 second intervals. The autocorrelation decayed to 50% at approximately [X] seconds and to 25% at approximately [Y] seconds. Based on this analysis, a gap threshold of [Z] seconds was chosen, corresponding to the timescale at which past positions remain moderately predictive of current position. Gaps shorter than this threshold were filled using cubic spline interpolation; gaps longer than this threshold resulted in the trajectory being split into separate segments."
+
+Include the `autocorrelation_analysis.png` plot in your methods or supplementary materials.
+
+---
+
+## Troubleshooting
+
+### "pip is not recognized"
+Use `python -m pip` instead:
+```
+python -m pip install numpy pandas scipy matplotlib openpyxl
+```
+
+### "python is not recognized"
+- Ensure Python is installed: https://www.python.org/downloads/
+- Tick "Add Python to PATH" during installation
+- Restart VS Code after installation
+
+### Script runs but no output files
+- Check that `bee_data/` folder contains your xlsx files
+- Check that `output/` folder exists (create it if not)
+
+### Memory errors with large files
+- Close other applications
+- Process fewer bees at a time by moving some xlsx files temporarily
